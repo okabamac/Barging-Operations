@@ -33,7 +33,7 @@ try:
 except Exception as e:
     st.sidebar.warning("Could not load logo image. Please ensure 'NNPC-Logo.png' is in the correct directory.")
 
-st.write("This app shows the number of AIS infractions for each item in the shuttle fleet.", unsafe_allow_html=True)
+st.write("This app shows the barging route from asset to export.", unsafe_allow_html=True)
 
 st.sidebar.write("Barging Operations")
 
@@ -168,25 +168,29 @@ for trace in edge_trace:
 # Add the node trace
 fig.add_trace(node_trace)
 
-# Update layout - this fixes the error in the original code
+# Update layout - FIXED version
 fig.update_layout(
-    title='Barging Ops',
-    titlefont_size=16,
+    title=dict(
+        text='Barging Ops',
+        font=dict(size=16)
+    ),
     showlegend=False,
     hovermode='closest',
     margin=dict(b=20, l=5, r=5, t=40),
     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
     height=800
+    # width removed or fixed earlier
 )
+
 
 # Create a container for the graph
 graph_container = st.container()
 
 # Inside the container, display the graph with the proper parameter
 with graph_container:
-    st.plotly_chart(fig, use_container_width=True)  # Changed from use_column_width to use_container_width
+    st.plotly_chart(fig, use_container_width=True)
 
 # Add a simple data view below the graph
-st.subheader(f"AIS Infraction Data for {selected_item}")
-st.dataframe(df_selected[['Shuttle', 'AIS_Infraction', 'FSO']], use_container_width=True)  # Changed from use_column_width to use_container_width
+st.subheader(f"AIS Data Data for {selected_item}")
+st.dataframe(df_selected[['Shuttle', 'AIS_Infraction', 'FSO']], use_container_width=True)
