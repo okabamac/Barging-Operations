@@ -29,6 +29,7 @@ except Exception:
 
 st.write("This app shows the barging route from asset to export.")
 st.sidebar.write("Barging Operations")
+st.sidebar.write("AIS infraction counts are in parentheses")
 
 # Read data
 try:
@@ -166,6 +167,7 @@ for node, attrs in G.nodes(data=True):
     x, y = pos[node]
     node_type = attrs.get("type")
     img_path = resolve_image(node_type)
+
     images.append(add_image_node(img_path, x, y))
 
 # Final figure
