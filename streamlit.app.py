@@ -3,23 +3,29 @@ import pandas as pd
 import networkx as nx
 import plotly.graph_objects as go
 from PIL import Image
-import os
 
+# Set page config
 st.set_page_config(layout="wide")
 
+# Custom CSS
 st.markdown("""
     <style>
     .reportview-container .main .block-container {
         max-width: 1200px;
-        padding: 2rem;
+        padding-top: 2rem;
+        padding-right: 2rem;
+        padding-left: 2rem;
+        padding-bottom: 2rem;
     }
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
 
+# Title
 st.title("NNPC Command & Control Centre")
 
+# Sidebar image
 try:
     image = Image.open('NNPC-Logo.png')
     image = image.resize((80, 50))
@@ -29,7 +35,6 @@ except Exception:
 
 st.write("This app shows the barging route from asset to export.")
 st.sidebar.write("Barging Operations")
-st.sidebar.write("AIS infraction counts are in parentheses")
 
 # Read data
 try:
@@ -39,29 +44,34 @@ except Exception as e:
     st.error(f"Error loading CSV: {e}")
     st.stop()
 
-# Totals
+# Calculate totals
 df_totals = df.groupby('Item')['AIS_Infraction'].sum().reset_index()
 df = pd.merge(df, df_totals, on='Item', suffixes=('', '_total'))
 
-# Sidebar selector
+# Sidebar radio menu
 selected_item = st.sidebar.radio('Select Asset', df['Item'].unique())
 
+# Filter by selection
 df_selected = df[df['Item'] == selected_item].copy()
 
-# Graph init
+# Directed graph
 G = nx.DiGraph()
+
+# Add item node
 for item in df_selected['Item'].unique():
     G.add_node(item, type='Item')
 
+# Add FSO node
 FSO = df_selected.iloc[0]['FSO']
 G.add_node(FSO, type='FSO')
 
+# Add Jetty nodes
 has_jetty = 'Jetty' in df_selected.columns
 if has_jetty:
     for jetty in df_selected['Jetty'].dropna().unique():
         G.add_node(jetty, type='Jetty')
 
-# Add nodes & edges
+# Add shuttle nodes and edges
 for _, row in df_selected.iterrows():
     item = row['Item']
     jetty = row['Jetty'] if 'Jetty' in row and pd.notna(row['Jetty']) else None
@@ -86,14 +96,16 @@ for _, row in df_selected.iterrows():
         else:
             G.add_edge(item, FSO)
 
-# Layout positions
+# Node layout
 pos = {}
 level_height = 200
 node_distance = 50
 
+# Top level: Item
 for i, item in enumerate(df_selected['Item'].unique()):
     pos[item] = (i * node_distance, level_height * 3)
 
+# Middle: Jetty and Shuttle
 if has_jetty:
     for i, jetty in enumerate(df_selected['Jetty'].dropna().unique()):
         pos[jetty] = (i * node_distance, level_height * 2)
@@ -103,9 +115,10 @@ else:
     for i, shuttle in enumerate(df_selected['Shuttle'].dropna().unique()):
         pos[shuttle] = (i * node_distance, level_height * 1.5)
 
+# Bottom: FSO
 pos[FSO] = ((len(df_selected['Shuttle'].dropna().unique()) - 1) * node_distance / 2, 0)
 
-# Color mapping
+# Color scale
 max_aif = max(df_selected['AIS_Infraction']) if not df_selected.empty else 1
 min_aif = min(df_selected['AIS_Infraction']) if not df_selected.empty else 0
 
@@ -117,7 +130,7 @@ def calculate_color(aif):
     g = int(255 * (1 - norm))
     return f'rgb({r}, {g}, 0)'
 
-# Edge trace
+# Edge traces
 edge_trace = []
 for edge in G.edges(data=True):
     x0, y0 = pos[edge[0]]
@@ -130,11 +143,11 @@ for edge in G.edges(data=True):
         hoverinfo='none'
     ))
 
-# Node trace (text only, no circle markers)
+# Node trace
 node_trace = go.Scatter(
-    x=[], y=[], text=[], mode='text',
-    hoverinfo='text', textfont=dict(size=17),  # Increased font size
-    textposition='top center'
+    x=[], y=[], text=[], mode='markers+text',
+    hoverinfo='text', textposition='top center',
+    marker=dict(size=20, color=[], showscale=False)
 )
 
 for node in G.nodes():
@@ -143,38 +156,17 @@ for node in G.nodes():
     node_trace['x'] += (x,)
     node_trace['y'] += (y,)
     node_trace['text'] += (label,)
+    if G.nodes[node]['type'] == 'Shuttle':
+        node_trace['marker']['color'] += (calculate_color(G.nodes[node]['AIS_Infraction']),)
+    else:
+        node_trace['marker']['color'] += ('orange',)
 
-# Image overlay logic
-images = []
-
-def resolve_image(node_type):
-    base = f"barge_images/{node_type.lower()}.png"
-    fallback = "barge_images/default.png"
-    return base if os.path.exists(base) else fallback
-
-def add_image_node(img_path, x, y):
-    return dict(
-        source=img_path,
-        xref="x", yref="y",
-        x=x - 10,
-        y=y + 10,
-        sizex=20, sizey=20,
-        xanchor="left", yanchor="bottom",
-        layer="above"
-    )
-
-for node, attrs in G.nodes(data=True):
-    x, y = pos[node]
-    node_type = attrs.get("type")
-    img_path = resolve_image(node_type)
-
-    images.append(add_image_node(img_path, x, y))
-
-# Final figure
+# Plotly figure
 fig = go.Figure()
 for trace in edge_trace:
     fig.add_trace(trace)
 fig.add_trace(node_trace)
+
 fig.update_layout(
     title=dict(text='Barging Ops', font=dict(size=16)),
     showlegend=False,
@@ -182,11 +174,12 @@ fig.update_layout(
     margin=dict(b=20, l=5, r=5, t=40),
     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-    height=800,
-    images=images
+    height=800
 )
 
-# Display
+# Show chart
 st.plotly_chart(fig, use_container_width=True)
+
+# Data table
 st.subheader(f"AIS Data for {selected_item}")
 st.dataframe(df_selected[['Shuttle', 'AIS_Infraction', 'FSO']], use_container_width=True)
