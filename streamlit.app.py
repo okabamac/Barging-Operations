@@ -7,9 +7,14 @@ from PIL import Image
 # Set page config
 st.set_page_config(layout="wide")
 
-# Custom CSS
+# Custom CSS for Modern UI
 st.markdown("""
     <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
     .reportview-container .main .block-container {
         max-width: 1200px;
         padding-top: 2rem;
@@ -17,31 +22,58 @@ st.markdown("""
         padding-left: 2rem;
         padding-bottom: 2rem;
     }
+    
+    /* Hide top header and footer */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Metric Cards */
+    div[data-testid="stMetricValue"] {
+        font-size: 2.5rem;
+        color: #00d2ff;
+        font-weight: 600;
+    }
+    div[data-testid="metric-container"] {
+        background: rgba(28, 35, 49, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 1rem 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        backdrop-filter: blur(10px);
+        transition: transform 0.2s;
+    }
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-5px);
+    }
     </style>
 """, unsafe_allow_html=True)
 
 # Title
 st.title("NNPC Command & Control Centre")
 
+import os
+
 # Sidebar image
 try:
-    image = Image.open('NNPC-Logo.png')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    logo_path = os.path.join(script_dir, 'NNPC-Logo.png')
+    image = Image.open(logo_path)
     image = image.resize((80, 50))
     st.sidebar.image(image, use_container_width=False)
-except Exception:
-    st.sidebar.warning("Logo not found. Ensure 'NNPC-Logo.png' is available.")
+except Exception as e:
+    st.sidebar.warning(f"Logo not found. Ensure 'NNPC-Logo.png' is available. Error: {e}")
 
-st.write("This app shows the barging route from asset to export.")
-st.sidebar.write("Barging Operations")
+st.markdown("<p style='font-size: 1.1rem; color: #a9b5c7;'>Monitor, track, and visualize the real-time barging route network from asset to export terminals.</p>", unsafe_allow_html=True)
+st.sidebar.markdown("### Control Panel")
 
 # Read data
 try:
-    df = pd.read_csv('shuttles.csv')
+    csv_path = os.path.join(script_dir, 'shuttles.csv')
+    df = pd.read_csv(csv_path)
     df['AIS_Infraction'] = df['AIS_Infraction'].fillna(0).astype(int)
 except Exception as e:
-    st.error(f"Error loading CSV: {e}")
+    st.error(f"Error loading CSV from {csv_path}: {e}")
     st.stop()
 
 # Calculate totals
@@ -53,6 +85,18 @@ selected_item = st.sidebar.radio('Select Asset', df['Item'].unique())
 
 # Filter by selection
 df_selected = df[df['Item'] == selected_item].copy()
+
+# Dashboard Metrics Layer
+st.markdown("### Command Overview")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Total Shuttles Active", len(df_selected['Shuttle'].dropna().unique()))
+with col2:
+    st.metric("Total AIS Infractions", int(df_selected['AIS_Infraction'].sum()))
+with col3:
+    st.metric("Total Jetties", len(df_selected['Jetty'].dropna().unique()) if 'Jetty' in df_selected.columns else 0)
+
+st.divider()
 
 # Directed graph
 G = nx.DiGraph()
@@ -77,10 +121,15 @@ for _, row in df_selected.iterrows():
     jetty = row['Jetty'] if 'Jetty' in row and pd.notna(row['Jetty']) else None
     shuttle = row['Shuttle'] if 'Shuttle' in row and pd.notna(row['Shuttle']) else None
     aif = row['AIS_Infraction']
+    imo = row.get('Shuttle IMO', 'N/A')
+    cap = row.get('Shuttle Capacity', 'N/A')
+    status = row.get('Shuttle Status', 'Unknown')
 
     if shuttle:
-        label = f"{shuttle} ({aif})"
-        G.add_node(shuttle, type='Shuttle', label=label, AIS_Infraction=aif)
+        status_emoji = '✅' if status == 'Active' else ('❌' if status == 'Inactive' else '➖')
+        label = f"{status_emoji} {shuttle} ({imo})"
+        hover = f"<b>{shuttle}</b><br>IMO: {imo}<br>Capacity: {cap}<br>AIS Count: {aif}<br>Status: {status}"
+        G.add_node(shuttle, type='Shuttle', label=label, hover=hover, AIS_Infraction=aif)
 
         if jetty:
             G.add_edge(item, jetty)
@@ -135,7 +184,7 @@ edge_trace = []
 for edge in G.edges(data=True):
     x0, y0 = pos[edge[0]]
     x1, y1 = pos[edge[1]]
-    color = 'blue' if FSO in edge else 'gray'
+    color = '#00d2ff' if FSO in edge else 'rgba(255, 255, 255, 0.2)'
     edge_trace.append(go.Scatter(
         x=[x0, x1, None], y=[y0, y1, None],
         mode='lines',
@@ -146,20 +195,28 @@ for edge in G.edges(data=True):
 # Node trace
 node_trace = go.Scatter(
     x=[], y=[], text=[], mode='markers+text',
-    hoverinfo='text', textposition='top center',
-    marker=dict(size=20, color=[], showscale=False)
+    hoverinfo='text', hovertext=[], textposition='top center',
+    marker=dict(size=24, color=[], line=dict(width=2, color='white'), showscale=False)
 )
 
 for node in G.nodes():
     x, y = pos[node]
     label = G.nodes[node].get('label', node)
+    hover_info = G.nodes[node].get('hover', label)
     node_trace['x'] += (x,)
     node_trace['y'] += (y,)
     node_trace['text'] += (label,)
-    if G.nodes[node]['type'] == 'Shuttle':
+    node_trace['hovertext'] += (hover_info,)
+    
+    ntype = G.nodes[node]['type']
+    if ntype == 'Shuttle':
         node_trace['marker']['color'] += (calculate_color(G.nodes[node]['AIS_Infraction']),)
+    elif ntype == 'Item':
+        node_trace['marker']['color'] += ('#00d2ff',)
+    elif ntype == 'FSO':
+        node_trace['marker']['color'] += ('#00ff9d',)
     else:
-        node_trace['marker']['color'] += ('orange',)
+        node_trace['marker']['color'] += ('#ffb703',)
 
 # Plotly figure
 fig = go.Figure()
@@ -168,18 +225,26 @@ for trace in edge_trace:
 fig.add_trace(node_trace)
 
 fig.update_layout(
-    title=dict(text='Barging Ops', font=dict(size=16)),
+    title=dict(text='Interactive Barging Routes Map', font=dict(size=22, color='#ffffff', family="Inter, sans-serif")),
     showlegend=False,
     hovermode='closest',
-    margin=dict(b=20, l=5, r=5, t=40),
+    margin=dict(b=20, l=20, r=20, t=60),
     xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
     yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-    height=800
+    height=750,
+    plot_bgcolor='rgba(0,0,0,0)',
+    paper_bgcolor='rgba(0,0,0,0)',
 )
 
 # Show chart
 st.plotly_chart(fig, use_container_width=True)
 
 # Data table
-st.subheader(f"AIS Data for {selected_item}")
-st.dataframe(df_selected[['Shuttle', 'AIS_Infraction', 'FSO']], use_container_width=True)
+st.markdown("### Operational Data Records")
+cols_to_show = ['Shuttle', 'Shuttle IMO', 'Shuttle Capacity', 'Shuttle Status', 'AIS_Infraction', 'FSO']
+cols_to_show = [c for c in cols_to_show if c in df_selected.columns]
+st.dataframe(
+    df_selected[cols_to_show],
+    use_container_width=True,
+    hide_index=True
+)
